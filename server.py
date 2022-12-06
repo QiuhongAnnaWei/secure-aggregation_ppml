@@ -193,7 +193,7 @@ if __name__ == '__main__':
     dim = (num_rows, num_cols)
 
     # t_i represents the simulated group size of U_i (3,3,2,2)
-    t_1, t_2, t_3, t_4 = 3, 3, 3, 3
+    t_1, t_2, t_3, t_4 = 3, 3, 2, 2
     assert num_clients >= t_1 >= t_2 >= t_3 >= t_4 >= threshold
 
     server = secaggserver(port, dim, num_clients, t_1, t_2, t_3, t_4, threshold)
