@@ -10,6 +10,7 @@ Dependencies: Flask, socketio and socketIO_client
 `pip install Flask`
 
 `pip install flask_socketio`
+`pip install pycryptodome`
 
 # Usage:
 ## Client side:

@@ -1,87 +1,105 @@
 import socketio
-from random import randrange
+import random
 import numpy as np
-from copy import deepcopy
 import codecs
 import pickle
-import json
-
+from copy import deepcopy
+from utils import *
 
 class SecAggregator:
-    def __init__(self, common_base, common_mod, dimensions, weights):
-        self.secretkey = randrange(common_mod)  # s_u secret
-        self.pubkey = (self.base**self.secretkey) % self.mod  # s_u public
-        self.sndkey = randrange(common_mod)  # individual mask (b)
-        self.base = common_base
-        self.mod = common_mod
+    def __init__(self, t, dimensions, input):
+        self.t = t
         self.dim = dimensions
-        self.weights = weights
+        self.input = input
         self.keys = {}
         self.id = ''
-
-    # returns the public key
-    def public_key(self):
-        return self.pubkey
+        self.c_u_sk = None
+        self.c_u_pk = None
+        self.s_u_sk = None
+        self.s_u_pk = None
+        self.b_u = None
+        self.b_u_share = None
+        self.c_pk_dict = {}
+        self.s_pk_dict = {}
+        self.e_uv_dict = {}
 
     # set the `x` and dimension (shape)
-    def set_weights(self, wghts, dims):
-        self.weights = wghts
-        self.dim = dims
+    def set_input(self, input):
+        self.input = input
+        self.dim = self.input.shape
 
-    # set the base and mod
-    def configure(self, base, mod):
-        self.base = base
-        self.mod = mod
-        self.pubkey = (self.base**self.secretkey) % self.mod
-
-    # this is PRG(seed)
-    def generate_weights(self, seed):
+    # use a seed to generate a random mask with same shape as the input
+    def gen_mask(self, seed):
         np.random.seed(seed)
-        return np.float32(np.random.rand(self.dim[0], self.dim[1]))
+        return np.float64(np.random.rand(self.dim[0], self.dim[1]))
 
-    # calculate x_u + sum_{u<v}PRG(s_{u,v}) - sum_{u>v}PRG(s_{v, u}) + PRG(b_u)
-    # use the Diffie-Hellman key agreement to generate the public key
-    def prepare_weights(self, shared_keys, myid):
-        self.keys = shared_keys
-        self.id = myid
-        wghts = deepcopy(self.weights)
-        for sid in shared_keys:
-            if sid > self.id:
-                # i < j case
-                print("i < j", self.id, sid,
-                      (shared_keys[sid]**self.secretkey) % self.mod)
-                wghts += self.generate_weights(
-                    (shared_keys[sid]**self.secretkey) % self.mod)
-            elif sid < self.id:
-                # i > j case
-                print("i > j", self.id, sid,
-                      (shared_keys[sid]**self.secretkey) % self.mod)
-                wghts -= self.generate_weights(
-                    (shared_keys[sid]**self.secretkey) % self.mod)
-        wghts += self.generate_weights(self.sndkey)
-        return wghts
+    # handler for round 0
+    def gen_keys(self):
+        self.c_u_sk, self.c_u_pk = KA.gen()
+        self.s_u_sk, self.s_u_pk = KA.gen()
+        return self.c_u_pk, self.s_u_pk
 
-    # reveal other's key (this is not using t-out-of-n shamir SS, we should implement that)
-    def reveal(self, keylist):
-        wghts = np.zeros(self.dim)
-        for sid in keylist:
-            if sid > self.id:
-                wghts += self.generate_weights(
-                    (self.keys[sid]**self.secretkey) % self.mod)
-            elif sid < self.id:
-                wghts -= self.generapyte_weights(
-                    (self.keys[sid]**self.secretkey) % self.mod)
-        return -1 * wghts
+    # handler for round 1
+    def share_keys(self, U_1, c_pk_dict, s_pk_dict):
+        # sample random b_u
+        self.c_pk_dict = c_pk_dict
+        self.s_pk_dict = s_pk_dict
+        self.b_u = random.randint(0, 2**32 - 1)
+        # generate secret shares of s_u_sk and b_u
+        s_u_sk_shares = SS.share(self.s_u_sk, self.t, len(U_1))
+        b_u_shares = SS.share(self.b_u, self.t, len(U_1))
+        # for each other user v ∈ U1\{u}, compute e_{u,v}
+        e_uv_dict = {}
+        for i, v in enumerate(U_1):
+            if v == self.id:
+                self.b_u_share = b_u_shares[i]
+                continue
+            metadata = pickle.dumps(
+                [self.id, v, s_u_sk_shares[i], b_u_shares[i]])
+            c_v_pk = self.c_pk_dict[v]
+            shared_key = KA.agree(self.c_u_sk, c_v_pk)
+            e_uv = AE.encrypt(shared_key, shared_key, metadata)
+            e_uv_dict[v] = e_uv
+        return e_uv_dict
 
-    def private_secret(self):
-        # for online users, this is PRG(b_u)
-        return self.generate_weights(self.sndkey)
+    # handler for round 2
+    def prepare_masked_input(self, U_2, e_uv_dict):
+        # u is not included in this `U_2` (this is really U_2\{u})
+        masked_input = deepcopy(self.input)
+        self.e_uv_dict = e_uv_dict
+        for v in U_2:
+            shared_key = KA.agree(self.s_u_sk, self.s_pk_dict[v])
+            random.seed(shared_key)
+            s_uv = random.randint(0, 2**32 - 1)
+            if v > self.id:
+                print("shared: (i < j)", self.id, v, s_uv)
+                masked_input += self.gen_mask(s_uv)
+            elif v < self.id:
+                print("shared: (i > j)", self.id, v, s_uv)
+                masked_input -= self.gen_mask(s_uv)
+        masked_input += self.gen_mask(self.b_u)
+        print("original input:\n", self.input)
+        return masked_input
 
+    # handler for round 3
+    def unmasking(self, U_3):
+        U_2 = list(self.e_uv_dict.keys())
+        sk_shares_dict = {}
+        b_shares_dict = {self.id: self.b_u_share}
+        for v in U_2:
+            c_v_pk = self.c_pk_dict[v]
+            shared_key = KA.agree(self.c_u_sk, c_v_pk)
+            metadata = pickle.loads(AE.decrypt(shared_key, shared_key, self.e_uv_dict[v]))
+            assert metadata[0] == v and metadata[1] == self.id
+            if v not in U_3:
+                sk_shares_dict[v] = metadata[2] # for offline users, reconstruct s_v_sk
+            else:
+                b_shares_dict[v] = metadata[3] # for oneline users, reconstruct b_v
+        return sk_shares_dict, b_shares_dict
 
 class secaggclient:
-    def __init__(self, serverport):
-        self.aggregator = SecAggregator(
-            3, 100103, (10, 10), np.float32(np.full((10, 10), 3, dtype=int)))
+    def __init__(self, serverport, t, dimensions, input):
+        self.aggregator = SecAggregator(t, dimensions, input)
         self.id = ''
         self.keys = {}
         self.sio = socketio.Client()
@@ -89,23 +107,60 @@ class secaggclient:
 
     def start(self):
         self.register_handles()
-        print("Starting")
         self.sio.emit("wakeup")  # triggers the server to ask for pubkey
         self.sio.wait()
 
     def configure(self, b, m):
         self.aggregator.configure(b, m)
 
-    def set_weights(self, wghts, dims):
-        self.aggregator.set_weights(wghts, dims)
+    def set_input(self, input):
+        self.aggregator.set_input(input)
 
-    def weights_encoding(self, x):
-        return codecs.encode(pickle.dumps(x), 'base64').decode()
-
-    def weights_decoding(self, s):
-        return pickle.loads(codecs.decode(s.encode(), 'base64'))
+    def input_encoding(self, x):
+        return codecs.encode(pickle.dumps(x), 'base64')
 
     def register_handles(self):
+        # Round 0 (AdvertiseKeys)
+        @self.sio.on("advertise_keys")
+        def on_advertise_keys(*args):
+            msg = args[0]
+            self.id = msg['id']
+            self.aggregator.id = self.id
+            c_u_pk, s_u_pk = self.aggregator.gen_keys()
+            resp = {
+                'c_u_pk': c_u_pk,
+                's_u_pk': s_u_pk
+            }
+            self.sio.emit('done_advertise_keys', pickle.dumps(resp))
+
+        # Round 1 (ShareKeys)
+        @self.sio.on("share_keys")
+        def on_share_keys(*args):
+            c_pk_dict = pickle.loads(args[0])
+            s_pk_dict = pickle.loads(args[1])
+            U_1 = list(c_pk_dict.keys())
+            print("U_1", U_1)
+            e_uv_dict = self.aggregator.share_keys(U_1, c_pk_dict, s_pk_dict)
+            self.sio.emit('done_share_keys', pickle.dumps(e_uv_dict))
+
+        # Round 2 (MaskedInputCollection)
+        @self.sio.on("masked_input_collection")
+        def on_masked_input_collection(*args):
+            e_uv_dict = pickle.loads(args[0])
+            U_2 = list(e_uv_dict.keys())
+            masked_input = self.aggregator.prepare_masked_input(
+                U_2, e_uv_dict)
+            self.sio.emit('done_masked_input_collection', pickle.dumps(masked_input))
+
+        # Round 3 (Unmasking)
+        @self.sio.on("unmasking")
+        def on_unmasking(*args):
+            U_3 = pickle.loads(args[0])
+            sk_shares_dict, b_shares_dict = self.aggregator.unmasking(U_3)
+            print(sk_shares_dict)
+            print(b_shares_dict)
+            self.sio.emit('done_unmasking', pickle.dumps([sk_shares_dict, b_shares_dict]))
+
         # standard event handlers
         @self.sio.event
         def connect(*args):
@@ -114,7 +169,7 @@ class secaggclient:
             print("Connected and recieved this message", msg['message'])
 
         @self.sio.event
-        def connect_error(data):
+        def connect_error():
             print("The connection failed!")
             self.sio.emit("disconnect")
             self.sio.disconnect()
@@ -123,58 +178,28 @@ class secaggclient:
         def disconnect():
             self.sio.emit("disconnect")
             print("Disconnected!")
-
-        # emit its pubkey to the server
-        @self.sio.on("send_public_key")
-        def on_send_pubkey(*args):
-            msg = args[0]
-            self.id = msg['id']
-            pubkey = {
-                'key': self.aggregator.public_key()
-            }
-            self.sio.emit('public_key', pubkey)
-
-        # users reach n, now receiving all other's public keys and start sending weights
-        @self.sio.on("share_weights")
-        def on_sharedkeys(*args):
-            keydict = json.loads(args[0])
-            self.keys = keydict
-            print("KEYS RECIEVED: ", self.keys)
-            weight = self.aggregator.prepare_weights(self.keys, self.id)
-            weight = self.weights_encoding(weight)
-            resp = {
-                'weights': weight
-            }
-            self.sio.emit('weights', resp)
-
-        # if it arrives on-time, send RPG(b_u) to the server
-        @self.sio.on("send_secret")
-        def on_send_secret(*args):
-            secret = self.weights_encoding(self.aggregator.private_secret())
-            resp = {
-                'secret': secret
-            }
-            self.sio.emit('secret', resp)
-
-        # someone disconnected, so we need to reveal other's secret share
-        @self.sio.on("reveal_secret")
-        def on_reveal_secret(*args):
-            keylist = json.loads(args[0])
-            resp = {
-                'rvl_secret': self.weights_encoding(self.aggregator.reveal(keylist))
-            }
-            self.sio.emit('rvl_secret', resp)
+            self.sio.disconnect()
 
         # someone is late, disconnects
         @self.sio.on("late")
-        def on_late(*args):
+        def on_late():
             self.sio.emit("disconnect")
             print("Arrived too late, disconnected!")
-
+            self.sio.disconnect()
 
 if __name__ == "__main__":
-    c = secaggclient(2019)
-    c.set_weights(np.zeros((10, 10)), (10, 10))
-    c.configure(2, 100255)
+    port = 2019
+    t = 2
+
+    num_rows, num_cols = 10, 10
+    dim = (num_rows, num_cols)
+    input = np.zeros(dim)
+
+    c = secaggclient(port, t, dim, input)  # this input is a placeholder
+
+    # here, you actually configure the input (must follow the same dim)
+    c.set_input(input)
+    # c.set_input(np.ones(dim))
+    # c.set_input(np.random.rand(num_rows, num_cols))
+
     c.start()
-    print("Ready")
