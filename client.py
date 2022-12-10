@@ -5,8 +5,15 @@ import codecs
 import pickle
 from copy import deepcopy
 from utils import *
+import time
 
 from server import server_port, threshold, dim
+
+
+def sleep_for_a_while(s):
+    print(f"### {s}: sleeping for 5 seconds")
+    time.sleep(3)
+    print(f"### {s}: woke up")
 
 class SecAggregator:
     def __init__(self, t, dimensions, input):
@@ -101,15 +108,13 @@ class SecAggregator:
 
 class secaggclient:
     def __init__(self, serverport, t, dimensions, input):
+        self.serverport = serverport
         self.aggregator = SecAggregator(t, dimensions, input)
         self.id = ''
         self.keys = {}
         self.sio = socketio.Client()
-        self.sio.connect("http://localhost:" + str(serverport))
-
-    def start(self):
         self.register_handles()
-        self.sio.emit("wakeup")  # triggers the server to ask for pubkey
+        self.sio.connect("http://localhost:" + str(self.serverport))
         self.sio.wait()
 
     def configure(self, b, m):
@@ -125,8 +130,11 @@ class secaggclient:
         # Round 0 (AdvertiseKeys)
         @self.sio.on("advertise_keys")
         def on_advertise_keys(*args):
+        
             msg = args[0]
             self.id = msg['id']
+            sleep_for_a_while(f"CLIENT {self.id}: advertise_keys")
+
             self.aggregator.id = self.id
             c_u_pk, s_u_pk = self.aggregator.gen_keys()
             resp = {
@@ -138,6 +146,8 @@ class secaggclient:
         # Round 1 (ShareKeys)
         @self.sio.on("share_keys")
         def on_share_keys(*args):
+            sleep_for_a_while(f"CLIENT {self.id}: share_keys")
+
             c_pk_dict = pickle.loads(args[0])
             s_pk_dict = pickle.loads(args[1])
             U_1 = list(c_pk_dict.keys())
@@ -148,6 +158,8 @@ class secaggclient:
         # Round 2 (MaskedInputCollection)
         @self.sio.on("masked_input_collection")
         def on_masked_input_collection(*args):
+            sleep_for_a_while(f"CLIENT {self.id}: masked_input_collection")  
+
             e_uv_dict = pickle.loads(args[0])
             U_2 = list(e_uv_dict.keys())
             masked_input = self.aggregator.prepare_masked_input(
@@ -157,24 +169,14 @@ class secaggclient:
         # Round 3 (Unmasking)
         @self.sio.on("unmasking")
         def on_unmasking(*args):
+            sleep_for_a_while(f"CLIENT {self.id}: unmasking")
+
             U_3 = pickle.loads(args[0])
             sk_shares_dict, b_shares_dict = self.aggregator.unmasking(U_3)
             print(sk_shares_dict)
             print(b_shares_dict)
             self.sio.emit('done_unmasking', pickle.dumps([sk_shares_dict, b_shares_dict]))
 
-        # standard event handlers
-        @self.sio.event
-        def connect(*args):
-            msg = args[0]
-            self.sio.emit("connect")
-            print("Connected and recieved this message", msg['message'])
-
-        @self.sio.event
-        def connect_error():
-            print("The connection failed!")
-            self.sio.emit("disconnect")
-            self.sio.disconnect()
 
         @self.sio.event
         def disconnect():
@@ -182,18 +184,19 @@ class secaggclient:
             print("Disconnected!")
             self.sio.disconnect()
 
-        # disconnects
-        @self.sio.on("invalid")
-        def on_invalid():
-            disconnect()
+
+        @self.sio.on("waitandtry")
+        def on_waitandtry():
+            self.sio.sleep(1) # to make sure connection is fully set up
+            print("\n\n\n!!!inside on_waitandtry")
+            self.sio.emit("retryconnect")
+                
+
 
 if __name__ == "__main__":
     input = np.zeros(dim)
-
     c = secaggclient(server_port, threshold, dim, input)  # this input is a placeholder
 
     # here, you actually configure the input (must follow the same dim)
     # c.set_input(np.ones(dim))
     # c.set_input(np.random.rand(num_rows, num_cols))
-
-    c.start()
