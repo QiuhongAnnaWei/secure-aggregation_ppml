@@ -5,6 +5,10 @@ from secretsharing import SecretSharer
 from Cryptodome.Cipher import AES
 from Cryptodome.Hash import SHA256
 
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
 # Diffie-Hellman Kuba Wrapper created by Kuba Szczodrzyński
 class DH:
     _prime: int
@@ -44,7 +48,7 @@ class DH:
     def get_shared_key(self) -> bytes:
         return self._to_bytes(self._shared_key)
 
-class KA:
+class KA: # s and c
     # gen (sk, pk) pairs using Diffie-Hellman
     @staticmethod
     def gen():
@@ -63,7 +67,7 @@ class KA:
         key_256 = h.digest()
         return key_256
 
-class SS:
+class SS: # s and b
     # return n shares of a secret with t as threshold
     @staticmethod
     def share(secret, t, n):
@@ -80,7 +84,7 @@ class SS:
         secret = pickle.loads(secret_bytes)
         return secret
 
-class AE:
+class AE: # e
     # use AES to encrypt the plaintext (256-bit int)
     # nonce is selected to be KA.agree(sk, pk)
     @staticmethod

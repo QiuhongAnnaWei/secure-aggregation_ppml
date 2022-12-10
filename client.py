@@ -6,6 +6,8 @@ import pickle
 from copy import deepcopy
 from utils import *
 
+from server import server_port, threshold, dim
+
 class SecAggregator:
     def __init__(self, t, dimensions, input):
         self.t = t
@@ -180,25 +182,17 @@ class secaggclient:
             print("Disconnected!")
             self.sio.disconnect()
 
-        # someone is late, disconnects
-        @self.sio.on("late")
-        def on_late():
-            self.sio.emit("disconnect")
-            print("Arrived too late, disconnected!")
-            self.sio.disconnect()
+        # disconnects
+        @self.sio.on("invalid")
+        def on_invalid():
+            disconnect()
 
 if __name__ == "__main__":
-    port = 2019
-    t = 2
-
-    num_rows, num_cols = 10, 10
-    dim = (num_rows, num_cols)
     input = np.zeros(dim)
 
-    c = secaggclient(port, t, dim, input)  # this input is a placeholder
+    c = secaggclient(server_port, threshold, dim, input)  # this input is a placeholder
 
     # here, you actually configure the input (must follow the same dim)
-    c.set_input(input)
     # c.set_input(np.ones(dim))
     # c.set_input(np.random.rand(num_rows, num_cols))
 
