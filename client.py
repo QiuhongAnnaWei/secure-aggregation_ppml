@@ -12,7 +12,7 @@ from model import *
 from server import server_port, threshold, dim, lr, num_epochs, batch_size
 
 
-def sleep_for_a_while(s, x=5):
+def sleep_for_a_while(s, x=1):
     print(f"### {s}: sleeping for {x} seconds")
     time.sleep(x)
     print(f"### {s}: woke up")
@@ -128,16 +128,19 @@ class secaggclient:
         self.aggregator = SecAggregator(input)
         self.id = ''
         self.keys = {}
-        self.sio = socketio.Client(logger=True, engineio_logger=True)
+        # self.sio = socketio.Client(logger=True, engineio_logger=True) # debugging
+        self.sio = socketio.Client()
         self.register_handles()
         self.sio.connect("http://localhost:" + str(self.serverport))
         self.sio.wait()
 
-    def train_model(self):
-        LinearRegression(self.lr, self.num_epochs,
+    def train_model_and_calc_gradient(self):
+        self.model=LinearRegression(self.lr, self.num_epochs,
                                self.batch_size, self.model_weights)
         self.model.train(self.X_train, self.y_train)
+        print(f"training R^2: {self.model.score(self.X_train, self.y_train)}")
         self.gradient = self.model.output_gradient()
+        print(f"gradient:\n{self.gradient}")
 
     def set_input(self, input):
         self.aggregator.set_input(input)
@@ -149,9 +152,10 @@ class secaggclient:
         # Round 0 (AdvertiseKeysAndTrainModel)
         @self.sio.on("advertise_keys_and_train_model")
         def on_advertise_keys_and_train_model(*args):
+            sleep_for_a_while(f"CLIENT {self.id}: advertise_keys_and_train_model")
             self.id = pickle.loads(args[0])
-            sleep_for_a_while(
-                f"CLIENT {self.id}: advertise_keys_and_train_model")
+            self.model_weights = pickle.loads(args[1])
+            print(f"received model weights from server: {self.model_weights}")
             self.aggregator.id = self.id
             c_u_pk, s_u_pk = self.aggregator.gen_keys()
             resp = {
@@ -160,10 +164,11 @@ class secaggclient:
             }
             self.sio.emit('done_advertise_keys_and_train_model',
                           pickle.dumps(resp))
-            # start training after sending the public keys
-            self.model_weights = pickle.loads(args[1])
+            print('done_advertise_keys')
+            # start training
             self.gradient = None
-            self.train_model()
+            self.train_model_and_calc_gradient()
+            print('done_train_model')
 
         # Round 1 (ShareKeys)
         @self.sio.on("share_keys")
@@ -173,9 +178,10 @@ class secaggclient:
             c_pk_dict = pickle.loads(args[0])
             s_pk_dict = pickle.loads(args[1])
             U_1 = list(c_pk_dict.keys())
-            print("U_1", U_1)
+            print('generating key shares')
             e_uv_dict = self.aggregator.share_keys(U_1, c_pk_dict, s_pk_dict)
             self.sio.emit('done_share_keys', pickle.dumps(e_uv_dict))
+            print('done_share_keys')
 
         # Round 2 (MaskedInputCollection)
         @self.sio.on("masked_input_collection")
@@ -183,7 +189,8 @@ class secaggclient:
             sleep_for_a_while(f"CLIENT {self.id}: masked_input_collection")
 
             # didn't finish calculating gradient
-            if not self.gradient:
+            if self.gradient is None:
+                print('did not finish calculating gradient, failed')
                 return
 
             e_uv_dict = pickle.loads(args[0])
@@ -193,6 +200,7 @@ class secaggclient:
                 U_2, e_uv_dict)
             self.sio.emit('done_masked_input_collection',
                           pickle.dumps(masked_input))
+            print('done_masked_input_collection')
 
         # Round 3 (Unmasking)
         @self.sio.on("unmasking")
@@ -205,20 +213,7 @@ class secaggclient:
             print(b_shares_dict)
             self.sio.emit('done_unmasking', pickle.dumps(
                 [sk_shares_dict, b_shares_dict]))
-
-        # @self.sio.event
-        # def connect():
-        #     print("Connected!")
-
-        # @self.sio.event
-        # def disconnect():
-        #     self.sio.emit("disconnect")
-        #     print("Disconnected!")
-        #     self.sio.disconnect()
-        
-        # @self.sio.event
-        # def connect_error(data):
-        #     print("The connection failed!")
+            print('done_unmasking')
 
         @self.sio.on("waitandtry")
         def on_waitandtry():

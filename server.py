@@ -9,7 +9,9 @@ import time
 from train import *
 from model import *
 
+# global variables
 server_port = 2019
+num_clients = 4
 threshold = 3
 dim = (1, 11)
 lr = 1e-4
@@ -80,35 +82,34 @@ class secaggserver:
         self.c_pk_dict[request.sid] = public_keys['c_u_pk']
         self.s_pk_dict[request.sid] = public_keys['s_u_pk']
 
-    def round_0_attempt_action(self):  # AdvertiseKeys
-        """either start next round, move to next iteration, or keep on waiting for next client (default fall through)"""
-        if (self.curr_round != 0):
-            return
 
+    def round_0_attempt_action(self): # AdvertiseKeys
+        """either start next round, move to next iteration, or keep on waiting for next client (default fall through)"""
+        if (self.curr_round != 0): return
+    
         # start next round
         if (len(self.ready_client_ids) == self.n) or \
-                (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
-            self.curr_round = 1
-            print(
-                f"\nCollected keys from {len(self.ready_client_ids)} clients -- Starting Round 1.")
-
+            (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+            self.curr_round = 1  
+            print(f"\nCollected keys from {len(self.ready_client_ids)} clients -- Starting Round 1.")
+            
             ready_clients = list(self.ready_client_ids)
             self.U_1 = ready_clients
-            print("U_1: ", ready_clients)
+            print("U_1: ", self.U_1)
             self.ready_client_ids.clear()
-            self.lasttime = time.time()
             for client_id in ready_clients:
-                emit('share_keys', (pickle.dumps(self.c_pk_dict),
-                     pickle.dumps(self.s_pk_dict)), room=client_id)
+                emit('share_keys', (pickle.dumps(self.c_pk_dict), pickle.dumps(self.s_pk_dict)), room=client_id)
+            self.lasttime = time.time()
 
-            time.sleep(time_max)
-            if (self.curr_round == 1):  # only called if round 1 action never succeeded
-                self.round_1_attempt_action()  # in case someone disconnects
+            # time.sleep(time_max)
+            # if (self.curr_round == 1): # only called if round 1 action never succeeded
+            #     self.round_1_attempt_action() # in case someone disconnects
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
             self.move_to_next_iteration()
         # do nothing (wait for next client)
+
 
     def round_1_add_info(self, resp):  # ShareKeys
         self.ready_client_ids.add(request.sid)
@@ -135,14 +136,14 @@ class secaggserver:
             self.U_2 = ready_clients
             print("U_2: ", ready_clients)
             self.ready_client_ids.clear()
-            self.lasttime = time.time()
             for client_id in ready_clients:
                 emit('masked_input_collection', pickle.dumps(
                     self.e_uv_dict[client_id]), room=client_id)
-
-            time.sleep(time_max)
-            if (self.curr_round == 2):  # only called if round 2 action never succeeded
-                self.round_2_attempt_action()  # in case someone disconnects
+            self.lasttime = time.time()
+            
+            # time.sleep(time_max)
+            # if (self.curr_round == 2):  # only called if round 2 action never succeeded
+            #     self.round_2_attempt_action()  # in case someone disconnects
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
@@ -171,13 +172,13 @@ class secaggserver:
             self.U_3 = ready_clients
             print("U_3", ready_clients)
             self.ready_client_ids.clear()
-            self.lasttime = time.time()
             for client_id in ready_clients:
                 emit('unmasking', pickle.dumps(self.U_3), room=client_id)
-
-            time.sleep(time_max)
-            if (self.curr_round == 3):  # only called if round 3 action never succeeded
-                self.round_3_attempt_action()  # in case someone disconnects
+            self.lasttime = time.time()
+            
+            # time.sleep(time_max)
+            # if (self.curr_round == 3):  # only called if round 3 action never succeeded
+            #     self.round_3_attempt_action()  # in case someone disconnects
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
@@ -257,63 +258,51 @@ class secaggserver:
         # when new client connects or exisitng client renotify server of their alive state
         @self.socketio.on("connect")
         def handle_connect():
-            if (self.curr_round != -1):
-                print(request.sid, "Protocol has already begun: wait and try")
+            if(self.curr_round != -1):
+                print("Protocol has already begun: wait and try")
                 emit("waitandtry")
-            else:  # protocol has not started
+            else: # protocol has not started
                 print(request.sid, " Connected")
                 self.ready_client_ids.add(request.sid)
                 if len(self.ready_client_ids) == self.n:
-                    time.sleep(1)
                     print("All clients connected -- Starting Round 0.")
-
+                    
                     ready_clients = list(self.ready_client_ids)
                     self.U_0 = ready_clients
-                    print(f"U_0: {self.U_0}")
                     self.ready_client_ids.clear()
-
-                    self.lasttime = time.time()
                     self.curr_round = 0
-
-                    print(self.model_weights)
                     for client_id in ready_clients:
-                        # send model weights
-                        print("sending model weights to " + client_id)
-                        emit("advertise_keys_and_train_model", {
-                             "id": client_id, "weights": self.model_weights}, room=client_id)
-
+                        emit("advertise_keys_and_train_model", (pickle.dumps(client_id), pickle.dumps(self.model_weights)), room=client_id)
+                    self.lasttime = time.time()
         @self.socketio.on("retryconnect")
         def handle_retryconnect():
             handle_connect()
 
-        # Round 0 (AdvertiseKeys)
+        # Round 0 (AdvertiseKeysAndTrainModel)
         @self.socketio.on('done_advertise_keys_and_train_model')
         def handle_advertise_keys_and_train_model(resp):
             # also send model weights
-            self.meta_handler("AdvertiseKeysAndTrainModel", 0,
-                              self.U_0, resp, self.round_0_add_info)
+            self.meta_handler("AdvertiseKeysAndTrainModel", 0, self.U_0, resp, self.round_0_add_info)
             self.round_0_attempt_action()
 
         # Round 1 (ShareKeys)
         @self.socketio.on('done_share_keys')
         def handle_share_keys(resp):
-            self.meta_handler("ShareKeys", 1, self.U_1,
-                              resp, self.round_1_add_info)
+            self.meta_handler("round1-ShareKeys", 1, self.U_1, resp, self.round_1_add_info)
             self.round_1_attempt_action()
-
+                
         # Round 2 (MaskedInputCollection)
         @self.socketio.on('done_masked_input_collection')
         def handle_masked_input_collection(resp):
-            self.meta_handler("MaskedInputCollection", 2,
-                              self.U_2, resp, self.round_2_add_info)
+            self.meta_handler("round2-MaskedInputCollection", 2, self.U_2, resp, self.round_2_add_info)
             self.round_2_attempt_action()
 
         # Round 3 (Unmasking)
         @self.socketio.on('done_unmasking')
         def handle_unmasking(resp):
-            self.meta_handler("Unmasking", 3, self.U_3,
-                              resp, self.round_3_add_info)
+            self.meta_handler("round3-Unmasking", 3, self.U_3, resp, self.round_3_add_info)
             self.round_3_attempt_action()
+
 
         @self.socketio.on('disconnect')
         def handle_disconnect():
@@ -324,9 +313,8 @@ class secaggserver:
     def start(self):
         self.socketio.run(self.app, port=self.port)
 
-
 if __name__ == '__main__':
     time_max = 10
-    server = secaggserver(server_port, dim=dim, n=4, t=3)
+    server = secaggserver(server_port, dim=dim, n=num_clients, t=threshold)
     print("listening on http://localhost:2019")
     server.start()

@@ -12,10 +12,15 @@ class LinearRegression(object):
         self.weights = None
         self.losses = []
         self.scores = []
+        if self.init_weights is not None:
+            print("loading initial weight")
+            self.weights = np.copy(self.init_weights)
 
     def train(self, X, Y):
         n_examples = X.shape[0]
-        self.weights = self.init_weights if self.init_weights else np.zeros((1, X.shape[1]))
+        if self.init_weights is None:
+            print("no initial weight")
+            self.weights = np.zeros((1, X.shape[1]))
         for _ in range(self.num_epochs):
             indices = np.arange(n_examples)
             np.random.shuffle(indices)
@@ -54,7 +59,7 @@ class LinearRegression(object):
         plt.show()
     
     def output_gradient(self):
-        if self.init_weights:
-            return self.init_weights - self.weights
-        else:
+        if self.init_weights is None:
             return self.weights
+        else:
+            return self.weights - self.init_weights

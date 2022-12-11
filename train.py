@@ -18,8 +18,12 @@ def get_test_data():
 
 def train_model(id, lr = 1e-4, num_epochs = 10000, batch_size = 48, init_weights = None):
     X_train, y_train = get_train_data(id)
+    X_test, y_test= get_test_data()
     LR = LinearRegression(lr, num_epochs, batch_size, init_weights)
     LR.train(X_train, y_train)
+    print(f"training R^2: {LR.score(X_train, y_train)}")
+    print(f"testing R^2: {LR.score(X_test, y_test)}")
+    # LR.plot_performance()
     return LR.output_gradient()
 
 if __name__ == '__main__':
