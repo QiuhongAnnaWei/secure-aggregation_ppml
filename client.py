@@ -13,9 +13,10 @@ from server import server_port, threshold, dim, lr, num_epochs, batch_size
 
 
 def sleep_for_a_while(s, x=1):
-    # print(f"### {s}: sleeping for {x} seconds")
-    time.sleep(x)
-    # print(f"### {s}: woke up")
+    if args.sleep_time > 0:
+        # print(f"### {s}: sleeping for {x} seconds")
+        time.sleep(args.sleep_time)
+        # print(f"### {s}: woke up")
 
 
 class SecAggregator:
@@ -222,11 +223,18 @@ class secaggclient:
             print("\nwaiting for the next iteration.")
             self.sio.emit("retryconnect")
 
+        @self.sio.on("disconnect")
+        def disconnect():
+            self.sio.emit("disconnect")  # to make sure connection is fully set up
+            print("\nDisconnected!")
+            self.sio.disconnect()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-train_id", help="specify the train_id (for model training) here")
+    parser.add_argument("-train_id", help="specify the train_id (for model training) here")
+    parser.add_argument("-sleep_time", default=0, help="specify sleep time at each round, simulate network condition")
+
 
     args = parser.parse_args()
     train_id = args.train_id

@@ -40,6 +40,11 @@ class LinearRegression(object):
         predictions = X @ np.transpose(self.weights).reshape(-1)
         return predictions
 
+    def eval(self, X, y):
+        mse = self.MSE(X, y)
+        rsquare = self.score(X, y)
+        return mse, rsquare
+
     def MSE(self, X, y):
         n_examples = len(y)
         loss = 0

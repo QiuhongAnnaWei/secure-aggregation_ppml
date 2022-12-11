@@ -5,7 +5,8 @@ from utils import *
 import pickle
 import numpy as np
 import random
-import time
+import os
+import time, datetime
 from train import *
 from model import *
 
@@ -18,6 +19,7 @@ lr = 1e-4
 num_epochs = 100
 batch_size = 48
 X_test, y_test = get_test_data()
+rsquare_thres = 0.001
 
 def sleep_for_a_while(s):
     # print(f"### {s}: sleeping for 5 seconds")
@@ -33,6 +35,15 @@ class secaggserver:
         self.t = t  # the threshold
         self.iter_no = 0
         self.model_weights = np.zeros(self.dim)
+
+        self.all_seen_clients = set()
+
+        self.mses = []
+        self.rsquares = []
+        self.timestamp = datetime.datetime.now().strftime("%m%d_%H%M%S_%f")[:-3]
+        self.out_dir = os.path.join("output", self.timestamp)
+        if not os.path.exists(self.out_dir): os.makedirs(self.out_dir)
+
         self.clear()
 
         self.app = Flask(__name__)
@@ -40,6 +51,7 @@ class secaggserver:
         self.register_handles()
 
     def clear(self):
+        """called between each iteration"""
         self.U_0, self.U_1, self.U_2, self.U_3, self.U_4 = [], [], [], [], []
         self.ready_client_ids = set()
 
@@ -55,7 +67,7 @@ class secaggserver:
     def move_to_next_iteration(self):
         # print("move to next iteration\n\n\n")
         for client_id in self.ready_client_ids:
-            emit("waitandtry", room=client_id)  # TODO?
+            emit("waitandtry", room=client_id) 
         self.clear()
 
     # use a seed to generate a random mask with same shape as the input
@@ -142,14 +154,15 @@ class secaggserver:
                     self.e_uv_dict[client_id]), room=client_id)
             self.lasttime = time.time()
             
-            # time.sleep(time_max)
-            # if (self.curr_round == 2):  # only called if round 2 action never succeeded
-            #     self.round_2_attempt_action()  # in case someone disconnects
+            time.sleep(time_max)
+            if (self.curr_round == 2):  # only called if round 2 action never succeeded
+                self.round_2_attempt_action()  # in case someone disconnects
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
             self.move_to_next_iteration()
         # do nothing (wait for next client)
+
 
     def round_2_add_info(self, resp):  # MaskedInputCollection
         # decode the masked input
@@ -176,14 +189,15 @@ class secaggserver:
                 emit('unmasking', pickle.dumps(self.U_3), room=client_id)
             self.lasttime = time.time()
             
-            # time.sleep(time_max)
-            # if (self.curr_round == 3):  # only called if round 3 action never succeeded
-            #     self.round_3_attempt_action()  # in case someone disconnects
+            time.sleep(time_max)
+            if (self.curr_round == 3):  # only called if round 3 action never succeeded
+                self.round_3_attempt_action()  # in case someone disconnects
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
             self.move_to_next_iteration()
         # do nothing (wait for next client)
+
 
     def round_3_add_info(self, resp):  # Unmasking
         # decode the masked input
@@ -243,19 +257,34 @@ class secaggserver:
 
             # show the R^2 and MSE result
             LR = LinearRegression(lr, num_epochs, batch_size, self.model_weights)
-            print('Test R^2: ' + str(LR.score(X_test, y_test)))
-
-            self.move_to_next_iteration()
+            mse, rsquare = LR.eval(X_test, y_test)
+            print('Test R^2: ' + str(rsquare))
+            self.mses.append(mse)
+            self.rsquares.append(rsquare)
+            if (self.iter_no-1) %5 == 0:
+                plot(self.out_dir, np.array(self.mses), np.array(self.rsquares))
+            if self.iter_no >= 10:
+                if abs(self.rsquares[-2]-self.rsquares[-3]) < rsquare_thres and  \
+                   abs(self.rsquares[-1]-self.rsquares[-2]) < rsquare_thres:
+                    for client_id in self.all_seen_clients:
+                        emit("disconnect", room=client_id)
+            else:      
+                self.move_to_next_iteration()
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
             # print("could not compute final aggregate")
             self.move_to_next_iteration()
 
+
+
+
     def register_handles(self):
         # when new client connects or exisitng client renotify server of their alive state
         @self.socketio.on("connect")
         def handle_connect():
+            self.all_seen_clients.add(request.sid)
+
             if(self.curr_round != -1):
                 # print("Protocol has already begun: wait and try")
                 emit("waitandtry")
@@ -308,6 +337,7 @@ class secaggserver:
             print(request.sid, " Disconnected")
             if request.sid in self.ready_client_ids:
                 self.ready_client_ids.remove(request.sid)
+                self.all_seen_clients.remove(request.sid)
 
     def start(self):
         self.socketio.run(self.app, port=self.port)

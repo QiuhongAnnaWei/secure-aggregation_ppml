@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 from model import LinearRegression
 
 def get_train_data(index):
@@ -25,6 +27,39 @@ def train_model(id, lr = 1e-4, num_epochs = 10000, batch_size = 48, init_weights
     print(f"testing R^2: {LR.score(X_test, y_test)}")
     # LR.plot_performance()
     return LR.output_gradient()
+
+
+def plot(fp="", mses=None, rsquares=None):
+
+    iters = list(range(1, mses.shape[0]+1))
+
+    fig = plt.figure(dpi=300, figsize=(5,5))
+    if rsquares is not None:  
+        plt.plot(iters, rsquares)
+        plt.scatter(iters, rsquares, s=11)
+
+    # plt.gca().set(xlim=rang, ylim=rang)
+    plt.title(f"Performance vs Training Iteration (at iter{iters[-1]})", fontsize=8)
+    plt.xticks(fontsize=8)
+    plt.yticks(fontsize=8)
+    fig.tight_layout()
+    plt.savefig(f"{fp}/iter{iters[-1]}_rsquare.png")
+    plt.close(fig)
+
+
+    fig = plt.figure(dpi=300, figsize=(5,5))
+    if mses is not None: 
+        plt.plot(iters, mses)
+        plt.scatter(iters, mses, s=11)
+
+    # plt.gca().set(xlim=rang, ylim=rang)
+    plt.title(f"Performance vs Training Iteration (at iter{iters[-1]})", fontsize=8)
+    plt.xticks(fontsize=8)
+    plt.yticks(fontsize=8)
+    fig.tight_layout()
+    plt.savefig(f"{fp}/iter{iters[-1]}_mse.png")
+    plt.close(fig)
+
 
 if __name__ == '__main__':
     train_model(id = 0)
