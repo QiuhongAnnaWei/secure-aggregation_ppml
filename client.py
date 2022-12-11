@@ -6,19 +6,22 @@ import pickle
 from copy import deepcopy
 from utils import *
 import time
+import argparse
+from train import *
+from model import *
+from server import server_port, threshold, dim, lr, num_epochs, batch_size
 
-from server import server_port, threshold, dim
 
-
-def sleep_for_a_while(s):
-    print(f"### {s}: sleeping for 5 seconds")
-    time.sleep(3)
+def sleep_for_a_while(s, x=5):
+    print(f"### {s}: sleeping for {x} seconds")
+    time.sleep(x)
     print(f"### {s}: woke up")
 
+
 class SecAggregator:
-    def __init__(self, t, dimensions, input):
-        self.t = t
-        self.dim = dimensions
+    def __init__(self, input):
+        self.t = threshold
+        self.dim = dim
         self.input = input
         self.keys = {}
         self.id = ''
@@ -32,10 +35,9 @@ class SecAggregator:
         self.s_pk_dict = {}
         self.e_uv_dict = {}
 
-    # set the `x` and dimension (shape)
+    # set the input
     def set_input(self, input):
         self.input = input
-        self.dim = self.input.shape
 
     # use a seed to generate a random mask with same shape as the input
     def gen_mask(self, seed):
@@ -98,27 +100,44 @@ class SecAggregator:
         for v in U_2:
             c_v_pk = self.c_pk_dict[v]
             shared_key = KA.agree(self.c_u_sk, c_v_pk)
-            metadata = pickle.loads(AE.decrypt(shared_key, shared_key, self.e_uv_dict[v]))
+            metadata = pickle.loads(AE.decrypt(
+                shared_key, shared_key, self.e_uv_dict[v]))
             assert metadata[0] == v and metadata[1] == self.id
             if v not in U_3:
-                sk_shares_dict[v] = metadata[2] # for offline users, reconstruct s_v_sk
+                # for offline users, reconstruct s_v_sk
+                sk_shares_dict[v] = metadata[2]
             else:
-                b_shares_dict[v] = metadata[3] # for oneline users, reconstruct b_v
+                # for oneline users, reconstruct b_v
+                b_shares_dict[v] = metadata[3]
         return sk_shares_dict, b_shares_dict
 
+
 class secaggclient:
-    def __init__(self, serverport, t, dimensions, input):
+    def __init__(self, serverport, input, train_id, lr, num_epochs, batch_size):
+        # model
+        self.X_train, self.y_train = get_train_data(train_id)
+        self.model = None
+        self.model_weights = None
+        self.lr = lr
+        self.num_epochs = num_epochs
+        self.batch_size = batch_size
+        self.gradient = None
+
+        # socket
         self.serverport = serverport
-        self.aggregator = SecAggregator(t, dimensions, input)
+        self.aggregator = SecAggregator(input)
         self.id = ''
         self.keys = {}
-        self.sio = socketio.Client()
+        self.sio = socketio.Client(logger=True, engineio_logger=True)
         self.register_handles()
         self.sio.connect("http://localhost:" + str(self.serverport))
         self.sio.wait()
 
-    def configure(self, b, m):
-        self.aggregator.configure(b, m)
+    def train_model(self):
+        LinearRegression(self.lr, self.num_epochs,
+                               self.batch_size, self.model_weights)
+        self.model.train(self.X_train, self.y_train)
+        self.gradient = self.model.output_gradient()
 
     def set_input(self, input):
         self.aggregator.set_input(input)
@@ -127,21 +146,24 @@ class secaggclient:
         return codecs.encode(pickle.dumps(x), 'base64')
 
     def register_handles(self):
-        # Round 0 (AdvertiseKeys)
-        @self.sio.on("advertise_keys")
-        def on_advertise_keys(*args):
-        
-            msg = args[0]
-            self.id = msg['id']
-            sleep_for_a_while(f"CLIENT {self.id}: advertise_keys")
-
+        # Round 0 (AdvertiseKeysAndTrainModel)
+        @self.sio.on("advertise_keys_and_train_model")
+        def on_advertise_keys_and_train_model(*args):
+            self.id = pickle.loads(args[0])
+            sleep_for_a_while(
+                f"CLIENT {self.id}: advertise_keys_and_train_model")
             self.aggregator.id = self.id
             c_u_pk, s_u_pk = self.aggregator.gen_keys()
             resp = {
                 'c_u_pk': c_u_pk,
                 's_u_pk': s_u_pk
             }
-            self.sio.emit('done_advertise_keys', pickle.dumps(resp))
+            self.sio.emit('done_advertise_keys_and_train_model',
+                          pickle.dumps(resp))
+            # start training after sending the public keys
+            self.model_weights = pickle.loads(args[1])
+            self.gradient = None
+            self.train_model()
 
         # Round 1 (ShareKeys)
         @self.sio.on("share_keys")
@@ -158,13 +180,19 @@ class secaggclient:
         # Round 2 (MaskedInputCollection)
         @self.sio.on("masked_input_collection")
         def on_masked_input_collection(*args):
-            sleep_for_a_while(f"CLIENT {self.id}: masked_input_collection")  
+            sleep_for_a_while(f"CLIENT {self.id}: masked_input_collection")
+
+            # didn't finish calculating gradient
+            if not self.gradient:
+                return
 
             e_uv_dict = pickle.loads(args[0])
             U_2 = list(e_uv_dict.keys())
+            self.aggregator.set_input(self.gradient)
             masked_input = self.aggregator.prepare_masked_input(
                 U_2, e_uv_dict)
-            self.sio.emit('done_masked_input_collection', pickle.dumps(masked_input))
+            self.sio.emit('done_masked_input_collection',
+                          pickle.dumps(masked_input))
 
         # Round 3 (Unmasking)
         @self.sio.on("unmasking")
@@ -175,28 +203,38 @@ class secaggclient:
             sk_shares_dict, b_shares_dict = self.aggregator.unmasking(U_3)
             print(sk_shares_dict)
             print(b_shares_dict)
-            self.sio.emit('done_unmasking', pickle.dumps([sk_shares_dict, b_shares_dict]))
+            self.sio.emit('done_unmasking', pickle.dumps(
+                [sk_shares_dict, b_shares_dict]))
 
+        # @self.sio.event
+        # def connect():
+        #     print("Connected!")
 
-        @self.sio.event
-        def disconnect():
-            self.sio.emit("disconnect")
-            print("Disconnected!")
-            self.sio.disconnect()
-
+        # @self.sio.event
+        # def disconnect():
+        #     self.sio.emit("disconnect")
+        #     print("Disconnected!")
+        #     self.sio.disconnect()
+        
+        # @self.sio.event
+        # def connect_error(data):
+        #     print("The connection failed!")
 
         @self.sio.on("waitandtry")
         def on_waitandtry():
-            self.sio.sleep(1) # to make sure connection is fully set up
+            self.sio.sleep(1)  # to make sure connection is fully set up
             print("\n\n\n!!!inside on_waitandtry")
             self.sio.emit("retryconnect")
-                
 
 
 if __name__ == "__main__":
-    input = np.zeros(dim)
-    c = secaggclient(server_port, threshold, dim, input)  # this input is a placeholder
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-train_id", help="specify the train_id (for model training) here")
 
-    # here, you actually configure the input (must follow the same dim)
-    # c.set_input(np.ones(dim))
-    # c.set_input(np.random.rand(num_rows, num_cols))
+    args = parser.parse_args()
+    train_id = args.train_id
+
+    input = np.zeros(dim)
+    c = secaggclient(server_port, input, train_id,
+                     lr, num_epochs, batch_size)  # this input is a placeholder
