@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 
 from model import LinearRegression
 
-def get_train_data(index):
-    X_train = pd.read_csv('./data/train_X_' + str(index) + '.csv',header=None)
-    y_train = pd.read_csv('./data/train_y_' + str(index) + '.csv',header=None)
+def get_train_data(fp, index):
+    X_train = pd.read_csv('./' + fp + '/train_X_' + str(index) + '.csv',header=None)
+    y_train = pd.read_csv('./' + fp + '/train_y_' + str(index) + '.csv',header=None)
     X_train = np.append(X_train, np.ones((len(X_train), 1)), axis=1)
     y_train = np.array([i[0] for i in y_train.values])
     return X_train, y_train
@@ -62,4 +62,4 @@ def plot(fp="", mses=None, rsquares=None):
 
 
 if __name__ == '__main__':
-    train_model(id = 0)
+    train_model(fp = "data1", id = 0)

@@ -116,7 +116,7 @@ class SecAggregator:
 class secaggclient:
     def __init__(self, serverport, input, train_id, lr, num_epochs, batch_size):
         # model
-        self.X_train, self.y_train = get_train_data(train_id)
+        self.X_train, self.y_train = get_train_data("data4", train_id)
         self.model = None
         self.model_weights = None
         self.lr = lr
