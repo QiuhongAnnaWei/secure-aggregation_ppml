@@ -99,13 +99,13 @@ class secaggserver:
             self.U_1 = ready_clients
             # print("U_1: ", self.U_1)
             self.ready_client_ids.clear()
+            self.lasttime = time.time()
             for client_id in ready_clients:
                 emit('share_keys', (pickle.dumps(self.c_pk_dict), pickle.dumps(self.s_pk_dict)), room=client_id)
-            self.lasttime = time.time()
-
-            # time.sleep(time_max)
-            # if (self.curr_round == 1): # only called if round 1 action never succeeded
-            #     self.round_1_attempt_action() # in case someone disconnects
+            
+            time.sleep(time_max)
+            if (self.curr_round == 1): # only called if round 1 action never succeeded
+                self.round_1_attempt_action() # in case someone disconnects
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):

@@ -162,17 +162,18 @@ class secaggclient:
                 'c_u_pk': c_u_pk,
                 's_u_pk': s_u_pk
             }
-            self.sio.emit('done_advertise_keys_and_train_model',
-                          pickle.dumps(resp))
-            # print('done_advertise_keys')
+
+            print('done_advertise_keys')
             # start training
             self.gradient = None
             self.train_model_and_calc_gradient()
-            # print('done_train_model')
+            print('done_train_model')
+            self.sio.emit('done_advertise_keys_and_train_model', pickle.dumps(resp))
 
         # Round 1 (ShareKeys)
         @self.sio.on("share_keys")
         def on_share_keys(*args):
+            print("now sharing keys")
             sleep_for_a_while(f"CLIENT {self.id}: share_keys")
 
             c_pk_dict = pickle.loads(args[0])
