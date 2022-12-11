@@ -20,9 +20,9 @@ batch_size = 48
 X_test, y_test = get_test_data()
 
 def sleep_for_a_while(s):
-    print(f"### {s}: sleeping for 5 seconds")
+    # print(f"### {s}: sleeping for 5 seconds")
     time.sleep(5)
-    print(f"### {s}: woke up")
+    # print(f"### {s}: woke up")
 
 
 class secaggserver:
@@ -31,6 +31,7 @@ class secaggserver:
         self.dim = dim
         self.n = n  # the number of users
         self.t = t  # the threshold
+        self.iter_no = 0
         self.model_weights = np.zeros(self.dim)
         self.clear()
 
@@ -49,9 +50,10 @@ class secaggserver:
 
         self.lasttime = time.time()
         self.curr_round = -1
+        self.iter_no += 1
 
     def move_to_next_iteration(self):
-        print("move to next iteration\n\n\n")
+        # print("move to next iteration\n\n\n")
         for client_id in self.ready_client_ids:
             emit("waitandtry", room=client_id)  # TODO?
         self.clear()
@@ -70,10 +72,10 @@ class secaggserver:
         else:  # Add entries for punctual users
             # actually in round, or this is the first time we pass the limit
             if (time.time()-self.lasttime > time_max):
-                print(f"Arrived too late for Round {roundno}: {name}")
+                # print(f"Arrived too late for Round {roundno}: {name}")
                 emit('waitandtry')
             else:
-                print(f"{request.sid} sends info for Round {roundno}")
+                # print(f"{request.sid} sends info for Round {roundno}")
                 add_info(resp)
 
     def round_0_add_info(self, resp):  # AdvertiseKeys
@@ -91,11 +93,11 @@ class secaggserver:
         if (len(self.ready_client_ids) == self.n) or \
             (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
             self.curr_round = 1  
-            print(f"\nCollected keys from {len(self.ready_client_ids)} clients -- Starting Round 1.")
+            print(f"Collected keys from {len(self.ready_client_ids)} clients -- Starting Round 1.")
             
             ready_clients = list(self.ready_client_ids)
             self.U_1 = ready_clients
-            print("U_1: ", self.U_1)
+            # print("U_1: ", self.U_1)
             self.ready_client_ids.clear()
             for client_id in ready_clients:
                 emit('share_keys', (pickle.dumps(self.c_pk_dict), pickle.dumps(self.s_pk_dict)), room=client_id)
@@ -129,12 +131,11 @@ class secaggserver:
         if len(self.ready_client_ids) == len(self.U_1) or \
                 (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
             self.curr_round = 2
-            print(
-                f"\nCollected e_uv from {len(self.ready_client_ids)} clients -- Starting Round 2.")
+            print(f"Collected e_uv from {len(self.ready_client_ids)} clients -- Starting Round 2.")
 
             ready_clients = list(self.ready_client_ids)
             self.U_2 = ready_clients
-            print("U_2: ", ready_clients)
+            # print("U_2: ", ready_clients)
             self.ready_client_ids.clear()
             for client_id in ready_clients:
                 emit('masked_input_collection', pickle.dumps(
@@ -165,12 +166,11 @@ class secaggserver:
         if len(self.ready_client_ids) == len(self.U_2) or \
                 (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
             self.curr_round = 3
-            print(
-                f"\nCollected y_u from {len(self.ready_client_ids)} clients -- Starting Round 3.")
+            print(f"Collected y_u from {len(self.ready_client_ids)} clients -- Starting Round 3.")
 
             ready_clients = list(self.ready_client_ids)
             self.U_3 = ready_clients
-            print("U_3", ready_clients)
+            # print("U_3", ready_clients)
             self.ready_client_ids.clear()
             for client_id in ready_clients:
                 emit('unmasking', pickle.dumps(self.U_3), room=client_id)
@@ -197,7 +197,7 @@ class secaggserver:
             if id not in self.b_shares_dict:
                 self.b_shares_dict[id] = []
             self.b_shares_dict[id].append(share)
-        print(f"\n{request.sid} sent secret shares.")
+        # print(f"\n{request.sid} sent secret shares.")
 
     def round_3_attempt_action(self):  # Unmasking
         """either compute result, move to next iteration, or keep on waiting for next client (default fall through)"""
@@ -208,12 +208,11 @@ class secaggserver:
         if len(self.ready_client_ids) == len(self.U_3) or \
                 (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
             self.curr_round = 4  # even though no more rounds after it
-            print(
-                f"\nCollected y_u from {len(self.ready_client_ids)} clients -- Starting Round 4 (final round).")
+            print(f"Collected y_u from {len(self.ready_client_ids)} clients -- Starting Round 4 (final round).")
 
             ready_clients = list(self.ready_client_ids)
             self.U_4 = ready_clients
-            print("U_4", ready_clients)
+            # print("U_4", ready_clients)
             mask = np.zeros(self.dim)
 
             # reconstruct s_{u,v} for all u in U2\U3
@@ -238,7 +237,6 @@ class secaggserver:
 
             # subtract the mask to get the final value
             self.aggregated_value += mask
-            print(f"final aggregate:\n", self.aggregated_value)
             
             # update the model weights using the average of all clients' gradients
             self.model_weights += self.aggregated_value / len(self.U_3)
@@ -251,7 +249,7 @@ class secaggserver:
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
-            print("could not compute final aggregate")
+            # print("could not compute final aggregate")
             self.move_to_next_iteration()
 
     def register_handles(self):
@@ -259,12 +257,13 @@ class secaggserver:
         @self.socketio.on("connect")
         def handle_connect():
             if(self.curr_round != -1):
-                print("Protocol has already begun: wait and try")
+                # print("Protocol has already begun: wait and try")
                 emit("waitandtry")
             else: # protocol has not started
                 print(request.sid, " Connected")
                 self.ready_client_ids.add(request.sid)
                 if len(self.ready_client_ids) == self.n:
+                    print('\n' + '-' * 20 + "iteration " + str(self.iter_no) + '-' * 20 )
                     print("All clients connected -- Starting Round 0.")
                     
                     ready_clients = list(self.ready_client_ids)
@@ -316,5 +315,5 @@ class secaggserver:
 if __name__ == '__main__':
     time_max = 10
     server = secaggserver(server_port, dim=dim, n=num_clients, t=threshold)
-    print("listening on http://localhost:2019")
+    # print("listening on http://localhost:2019")
     server.start()

@@ -13,9 +13,9 @@ from server import server_port, threshold, dim, lr, num_epochs, batch_size
 
 
 def sleep_for_a_while(s, x=1):
-    print(f"### {s}: sleeping for {x} seconds")
+    # print(f"### {s}: sleeping for {x} seconds")
     time.sleep(x)
-    print(f"### {s}: woke up")
+    # print(f"### {s}: woke up")
 
 
 class SecAggregator:
@@ -83,13 +83,13 @@ class SecAggregator:
             random.seed(shared_key)
             s_uv = random.randint(0, 2**32 - 1)
             if v > self.id:
-                print("shared: (i < j)", self.id, v, s_uv)
+                # print("shared: (i < j)", self.id, v, s_uv)
                 masked_input += self.gen_mask(s_uv)
             elif v < self.id:
-                print("shared: (i > j)", self.id, v, s_uv)
+                # print("shared: (i > j)", self.id, v, s_uv)
                 masked_input -= self.gen_mask(s_uv)
         masked_input += self.gen_mask(self.b_u)
-        print("original input:\n", self.input)
+        # print("original input:\n", self.input)
         return masked_input
 
     # handler for round 3
@@ -138,9 +138,9 @@ class secaggclient:
         self.model=LinearRegression(self.lr, self.num_epochs,
                                self.batch_size, self.model_weights)
         self.model.train(self.X_train, self.y_train)
-        print(f"training R^2: {self.model.score(self.X_train, self.y_train)}")
+        # print(f"training R^2: {self.model.score(self.X_train, self.y_train)}")
         self.gradient = self.model.output_gradient()
-        print(f"gradient:\n{self.gradient}")
+        # print(f"gradient:\n{self.gradient}")
 
     def set_input(self, input):
         self.aggregator.set_input(input)
@@ -155,7 +155,7 @@ class secaggclient:
             sleep_for_a_while(f"CLIENT {self.id}: advertise_keys_and_train_model")
             self.id = pickle.loads(args[0])
             self.model_weights = pickle.loads(args[1])
-            print(f"received model weights from server: {self.model_weights}")
+            print(f"Staring new iteration. Received model weights from server: {self.model_weights}")
             self.aggregator.id = self.id
             c_u_pk, s_u_pk = self.aggregator.gen_keys()
             resp = {
@@ -164,11 +164,11 @@ class secaggclient:
             }
             self.sio.emit('done_advertise_keys_and_train_model',
                           pickle.dumps(resp))
-            print('done_advertise_keys')
+            # print('done_advertise_keys')
             # start training
             self.gradient = None
             self.train_model_and_calc_gradient()
-            print('done_train_model')
+            # print('done_train_model')
 
         # Round 1 (ShareKeys)
         @self.sio.on("share_keys")
@@ -178,10 +178,10 @@ class secaggclient:
             c_pk_dict = pickle.loads(args[0])
             s_pk_dict = pickle.loads(args[1])
             U_1 = list(c_pk_dict.keys())
-            print('generating key shares')
+            # print('generating key shares')
             e_uv_dict = self.aggregator.share_keys(U_1, c_pk_dict, s_pk_dict)
             self.sio.emit('done_share_keys', pickle.dumps(e_uv_dict))
-            print('done_share_keys')
+            # print('done_share_keys')
 
         # Round 2 (MaskedInputCollection)
         @self.sio.on("masked_input_collection")
@@ -190,7 +190,7 @@ class secaggclient:
 
             # didn't finish calculating gradient
             if self.gradient is None:
-                print('did not finish calculating gradient, failed')
+                # print('did not finish calculating gradient, failed')
                 return
 
             e_uv_dict = pickle.loads(args[0])
@@ -200,7 +200,7 @@ class secaggclient:
                 U_2, e_uv_dict)
             self.sio.emit('done_masked_input_collection',
                           pickle.dumps(masked_input))
-            print('done_masked_input_collection')
+            # print('done_masked_input_collection')
 
         # Round 3 (Unmasking)
         @self.sio.on("unmasking")
@@ -209,16 +209,16 @@ class secaggclient:
 
             U_3 = pickle.loads(args[0])
             sk_shares_dict, b_shares_dict = self.aggregator.unmasking(U_3)
-            print(sk_shares_dict)
-            print(b_shares_dict)
+            # print(sk_shares_dict)
+            # print(b_shares_dict)
             self.sio.emit('done_unmasking', pickle.dumps(
                 [sk_shares_dict, b_shares_dict]))
-            print('done_unmasking')
+            # print('done_unmasking')
 
         @self.sio.on("waitandtry")
         def on_waitandtry():
             self.sio.sleep(1)  # to make sure connection is fully set up
-            print("\n\n\n!!!inside on_waitandtry")
+            print("\nwaiting for the next iteration.")
             self.sio.emit("retryconnect")
 
 

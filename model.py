@@ -13,13 +13,13 @@ class LinearRegression(object):
         self.losses = []
         self.scores = []
         if self.init_weights is not None:
-            print("loading initial weight")
+            # print("loading initial weight")
             self.weights = np.copy(self.init_weights)
 
     def train(self, X, Y):
         n_examples = X.shape[0]
         if self.init_weights is None:
-            print("no initial weight")
+            # print("no initial weight")
             self.weights = np.zeros((1, X.shape[1]))
         for _ in range(self.num_epochs):
             indices = np.arange(n_examples)
