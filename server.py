@@ -14,7 +14,7 @@ from model import *
 server_port = 2019
 num_clients = 4
 threshold = 3
-dim = (1, 11)
+dim = (1, 12)
 lr = 1e-4
 num_epochs = 100
 batch_size = 48
@@ -26,9 +26,8 @@ def sleep_for_a_while(s):
     time.sleep(5)
     # print(f"### {s}: woke up")
 
-
 class secaggserver:
-    def __init__(self, port, dim=(1, 11), n=4, t=3):
+    def __init__(self, port, dim=dim, n=4, t=3):
         self.port = port
         self.dim = dim
         self.n = n  # the number of users
