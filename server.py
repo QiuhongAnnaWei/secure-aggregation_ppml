@@ -12,7 +12,7 @@ from model import *
 
 # global variables
 server_port = 2019
-num_clients = 4
+num_clients = 5
 threshold = 3
 dim = (1, 12)
 lr = 1e-4
@@ -103,6 +103,8 @@ class secaggserver:
         # start next round
         if (len(self.ready_client_ids) == self.n) or \
             (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+            if (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+                print("NOTE: max time has passed without receiving response from all clients, but enough clients have responded")
             self.curr_round = 1  
             print(f"Collected keys from {len(self.ready_client_ids)} clients -- Starting Round 1.")
             
@@ -141,6 +143,8 @@ class secaggserver:
         # start next round
         if len(self.ready_client_ids) == len(self.U_1) or \
                 (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+            if (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+                print("NOTE: max time has passed without receiving response from all clients, but enough clients have responded")
             self.curr_round = 2
             print(f"Collected e_uv from {len(self.ready_client_ids)} clients -- Starting Round 2.")
 
@@ -177,6 +181,8 @@ class secaggserver:
         # start next round
         if len(self.ready_client_ids) == len(self.U_2) or \
                 (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+            if (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+                print("NOTE: max time has passed without receiving response from all clients, but enough clients have responded")
             self.curr_round = 3
             print(f"Collected y_u from {len(self.ready_client_ids)} clients -- Starting Round 3.")
 
@@ -220,6 +226,8 @@ class secaggserver:
         # compute result
         if len(self.ready_client_ids) == len(self.U_3) or \
                 (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+            if (time.time()-self.lasttime > time_max and len(self.ready_client_ids) >= self.t):
+                print("NOTE: max time has passed without receiving response from all clients, but enough clients have responded")
             self.curr_round = 4  # even though no more rounds after it
             print(f"Collected y_u from {len(self.ready_client_ids)} clients -- Starting Round 4 (final round).")
 
@@ -260,15 +268,19 @@ class secaggserver:
             print('Test R^2: ' + str(rsquare))
             self.mses.append(mse)
             self.rsquares.append(rsquare)
-            if (self.iter_no-1) %5 == 0:
-                plot(self.out_dir, np.array(self.mses), np.array(self.rsquares))
+           
             if self.iter_no >= 10:
                 if abs(self.rsquares[-2]-self.rsquares[-3]) < rsquare_thres and  \
                    abs(self.rsquares[-1]-self.rsquares[-2]) < rsquare_thres:
-                    for client_id in self.all_seen_clients:
-                        emit("disconnect", room=client_id)
-            else:      
-                self.move_to_next_iteration()
+                    print("Ready to finish training")
+                    plot(self.out_dir, np.array(self.mses), np.array(self.rsquares))
+                    for client_id in self.all_seen_clients: emit("disconnect", room=client_id)
+                    return
+            
+            if (self.iter_no-1) % 10 == 0:
+                plot(self.out_dir, np.array(self.mses), np.array(self.rsquares))
+            
+            self.move_to_next_iteration()
 
         # move to next iteration
         elif (time.time()-self.lasttime > time_max and len(self.ready_client_ids) < self.t):
@@ -342,7 +354,7 @@ class secaggserver:
         self.socketio.run(self.app, port=self.port)
 
 if __name__ == '__main__':
-    time_max = 10
+    time_max = 5
     server = secaggserver(server_port, dim=dim, n=num_clients, t=threshold)
     # print("listening on http://localhost:2019")
     server.start()

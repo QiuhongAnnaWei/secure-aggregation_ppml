@@ -9,13 +9,14 @@ import time
 import argparse
 from train import *
 from model import *
-from server import server_port, threshold, dim, lr, num_epochs, batch_size
+from server import server_port, threshold, dim, lr, num_epochs, batch_size, num_clients
 
 
 def sleep_for_a_while(s, x=1):
     if args.sleep_time > 0:
-        # print(f"### {s}: sleeping for {x} seconds")
-        time.sleep(args.sleep_time)
+        sleep_duration = random.uniform(0, args.sleep_time)
+        print(f"### {s}: sleeping for {sleep_duration} seconds")
+        time.sleep(random.uniform(0, sleep_duration))
         # print(f"### {s}: woke up")
 
 
@@ -77,7 +78,7 @@ class SecAggregator:
     # handler for round 2
     def prepare_masked_input(self, U_2, e_uv_dict):
         # u is not included in this `U_2` (this is really U_2\{u})
-        masked_input = deepcopy(self.input)
+        masked_input = deepcopy(self.input) # gradient
         self.e_uv_dict = e_uv_dict
         for v in U_2:
             shared_key = KA.agree(self.s_u_sk, self.s_pk_dict[v])
@@ -105,10 +106,10 @@ class SecAggregator:
                 shared_key, shared_key, self.e_uv_dict[v]))
             assert metadata[0] == v and metadata[1] == self.id
             if v not in U_3:
-                # for offline users, reconstruct s_v_sk
+                # for offline users, reconstruct s_v_sk (send its shares)
                 sk_shares_dict[v] = metadata[2]
             else:
-                # for oneline users, reconstruct b_v
+                # for online users, reconstruct b_v (send its shares)
                 b_shares_dict[v] = metadata[3]
         return sk_shares_dict, b_shares_dict
 
@@ -116,7 +117,7 @@ class SecAggregator:
 class secaggclient:
     def __init__(self, serverport, input, train_id, lr, num_epochs, batch_size):
         # model
-        self.X_train, self.y_train = get_train_data("data4", train_id)
+        self.X_train, self.y_train = get_train_data(f"data{num_clients}", train_id)
         self.model = None
         self.model_weights = None
         self.lr = lr
@@ -220,7 +221,7 @@ class secaggclient:
         @self.sio.on("waitandtry")
         def on_waitandtry():
             self.sio.sleep(1)  # to make sure connection is fully set up
-            print("\nwaiting for the next iteration.")
+            print("waiting for the next iteration\n")
             self.sio.emit("retryconnect")
 
         @self.sio.on("disconnect")
@@ -233,7 +234,7 @@ class secaggclient:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-train_id", help="specify the train_id (for model training) here")
-    parser.add_argument("-sleep_time", default=0, help="specify sleep time at each round, simulate network condition")
+    parser.add_argument("-sleep_time", type=int, default=0, help="specify sleep time at each round, simulate network condition")
 
 
     args = parser.parse_args()
